@@ -2299,9 +2299,6 @@ static bool ggml_cuda_compute_forward(ggml_backend_cuda_context & ctx, struct gg
         case GGML_OP_IM2COL:
             ggml_cuda_op_im2col(ctx, dst);
             break;
-        case GGML_OP_CONV_TRANSPOSE_1D:
-            ggml_cuda_op_conv_transpose_1d(ctx,dst);
-            break;
         case GGML_OP_COL2IM:
             ggml_cuda_op_col2im(ctx, dst);
             break;
@@ -2854,15 +2851,6 @@ GGML_CALL static bool ggml_backend_cuda_supports_op(ggml_backend_t backend, cons
             {
                 ggml_type src0_type = op->src[0]->type;
                 return src0_type != GGML_TYPE_I32 && src0_type != GGML_TYPE_I16;
-            } break;
-        case GGML_OP_CONV_TRANSPOSE_1D:
-            {
-                ggml_type src0_type = op->src[0]->type;
-                ggml_type src1_type = op->src[1]->type;
-                if (src0_type == GGML_TYPE_F32 && src1_type == GGML_TYPE_F32) {
-                    return true;
-                }
-                return false;
             } break;
         case GGML_OP_COL2IM:
         case GGML_OP_NONE:
