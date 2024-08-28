@@ -6736,40 +6736,44 @@ static int64_t ggml_calc_conv_transpose_output_size(int64_t ins, int64_t ks, int
 
 GGML_API struct ggml_tensor * ggml_conv_transpose_1d(
         struct ggml_context * ctx,
-        struct ggml_tensor  * a,
-        struct ggml_tensor  * b,
+        struct ggml_tensor  * a, // KW OC IC
+        struct ggml_tensor  * b, // IW IC N
         int                   s0,
         int                   p0,
         int                   d0) {
-    GGML_ASSERT(ggml_is_matrix(b));
-    GGML_ASSERT(a->ne[2] == b->ne[1]);
     GGML_ASSERT(a->ne[3] == 1);
+    GGML_ASSERT(b->ne[3] == 1);
+    GGML_ASSERT(a->ne[2] == b->ne[1]);
 
-    GGML_ASSERT(p0 == 0);
-    GGML_ASSERT(d0 == 1);
-
-    bool is_node = false;
-
-    if (a->grad || b->grad) {
-        GGML_ABORT("fatal error"); // TODO: implement backward
-        is_node = true;
-    }
-
-    const int64_t ne[4] = {
-        ggml_calc_conv_transpose_output_size(b->ne[0], a->ne[0], s0, 0 /*p0*/, 1 /*d0*/),
-        a->ne[1], b->ne[2], 1,
-    };
-    struct ggml_tensor * result = ggml_new_tensor(ctx, GGML_TYPE_F32, 4, ne);
-
-    int32_t params[] = { s0, p0, d0 };
-    ggml_set_op_params(result, params, sizeof(params));
-
-    result->op = GGML_OP_CONV_TRANSPOSE_1D;
-    result->grad = is_node ? ggml_dup_tensor(ctx, result) : NULL;
-    result->src[0] = a;
-    result->src[1] = b;
-
-    return result;
+    a = ggml_cont(ctx, ggml_permute(ctx, a, 2, 1, 0, 3)); // KW OC IC -> IC OC KW
+    b = ggml_permute(ctx, b, 1, 0, 2, 3);                 // IW IC N  -> IC IW N
+    if (a->type == b->type)
+        b = ggml_cont(ctx, b);
+    else
+        b = ggml_cast(ctx, b, a->type);
+    const int64_t IC = a->ne[0];
+    assert(IC == b->ne[0]);
+    const int64_t KW = a->ne[2];
+    const int64_t OC = a->ne[1];
+    const int64_t IW = b->ne[1];
+    const int64_t N = b->ne[2];
+    // The following line isn't necessary, in theory,
+    // but makes CUDA use cublasSgemm instead of
+    // cublasGemmBatchedEx.
+    // The latter doesn't pass test-backend-ops
+    // because of F16 approximations
+    a = ggml_reshape_4d(ctx, a, IC, OC*KW, 1, 1);
+    b = ggml_reshape_4d(ctx, b, IC, IW*N, 1, 1);
+    struct ggml_tensor * mulres = ggml_mul_mat(ctx, b, a);
+    mulres = ggml_reshape_4d(ctx, mulres, IW, N, OC, KW);
+    mulres = ggml_permute(ctx, mulres, 0, 3, 2, 1); // -> IW KW OC N
+    return ggml_col2im(ctx,
+                       mulres,
+                       s0, 1 /* s1 */,
+                       p0, 0 /* p1 */,
+                       d0, 1 /* d1 */,
+                       1 /* KH */,
+                       1 /* IH */);
 }
 
 // ggml_conv_depthwise
